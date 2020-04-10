@@ -1,5 +1,8 @@
 
-OUTPUT_EXE=TS100_$(lang)
+ifndef model
+model:=TS100
+endif
+OUTPUT_EXE=$(model)_$(lang)
 ifndef lang
 lang:= EN
 endif
@@ -7,12 +10,14 @@ endif
 # Discover the source files to build
 SOURCE := $(shell find . -type f -name '*.c')
 SOURCE_CPP := $(shell find . -type f -name '*.cpp')
+SOURCES := $(shell find . -type f -name '*.c*')
 S_SRCS := $(shell find . -type f -name '*.s') 
 
-APP_INC_DIR = ./inc
-CMSIS_DEVICE_INC_DIR = ./CMSIS/device
-CMSIS_CORE_INC_DIR = ./CMSIS/core
-HAL_INC_DIR = ./HAL_Driver/Inc
+APP_INC_DIR = ./Core/Inc
+CMSIS_DEVICE_INC_DIR = ./Drivers/CMSIS/Device/ST/STM32F1xx/Include
+CMSIS_CORE_INC_DIR = ./Drivers/CMSIS/Include
+HAL_INC_DIR = ./Drivers/STM32F1xx_HAL_Driver/Inc
+HAL_LEGACY_INC_DIR = ./Drivers/STM32F1xx_HAL_Driver/Inc/Legacy
 FRTOS_CMIS_INC_DIR = ./Middlewares/Third_Party/FreeRTOS/Source/CMSIS_RTOS
 FRTOS_INC_DIR = ./Middlewares/Third_Party/FreeRTOS/Source/include
 FRTOS_GCC_INC_DIR = ./Middlewares/Third_Party/FreeRTOS/Source/portable/GCC/ARM_CM3
@@ -21,6 +26,7 @@ INCLUDES = -I$(APP_INC_DIR)	\
 	-I$(CMSIS_DEVICE_INC_DIR)\
 	-I$(CMSIS_CORE_INC_DIR)	\
 	-I$(HAL_INC_DIR)	\
+	-I$(HAL_LEGACY_INC_DIR)	\
 	-I$(FRTOS_CMIS_INC_DIR)	\
 	-I$(FRTOS_INC_DIR)	\
 	-I$(FRTOS_GCC_INC_DIR)
@@ -31,14 +37,14 @@ HEXFILE_DIR=Hexfile
 OUTPUT_DIR=Objects
 
 # code optimisation ------------------------------------------------------------
-OPTIM=-O2 -finline-small-functions -findirect-inlining -fdiagnostics-color
+OPTIM=-Os -flto -ffat-lto-objects -finline-small-functions -findirect-inlining -fdiagnostics-color -ffunction-sections -fdata-sections
 
 
 # global defines ---------------------------------------------------------------
-GLOBAL_DEFINES += -D STM32F103T8Ux -D STM32F1 -D STM32 -D USE_HAL_DRIVER -D STM32F103xB -D USE_RTOS_SYSTICK -D LANG_$(lang) -D LANG
+GLOBAL_DEFINES += -D STM32F103T8Ux -D STM32F1 -D STM32 -D USE_HAL_DRIVER -D STM32F103xB -D USE_RTOS_SYSTICK -D LANG_$(lang) -D LANG -D MODEL_$(model)
 
 # Enable debug code generation
-DEBUG=-g
+DEBUG=-g3
 # Without debug code
 #DEBUG=
 
@@ -51,14 +57,17 @@ LDSCRIPT=LinkerScript.ld
 
 # ------------------------------------------------------------------------------
 COMPILER=gcc
+# arm-none is the general ARM compiler, 
+# arm-atollic is the atollic customised compilers if you have them setup
+COMPILER_PREFIX=arm-none
 # programs ---------------------------------------------------------------------
-CC=arm-none-eabi-gcc
-CPP=arm-none-eabi-g++
-AS=arm-none-eabi-as
-GCOV=arm-none-eabi-gcov
-OBJCOPY=arm-none-eabi-objcopy
-OBJDUMP=arm-none-eabi-objdump
-SIZE=arm-none-eabi-size
+CC=$(COMPILER_PREFIX)-eabi-gcc
+CPP=$(COMPILER_PREFIX)-eabi-g++
+AS=$(COMPILER_PREFIX)-eabi-as
+GCOV=$(COMPILER_PREFIX)-eabi-gcov
+OBJCOPY=$(COMPILER_PREFIX)-eabi-objcopy
+OBJDUMP=$(COMPILER_PREFIX)-eabi-objdump
+SIZE=$(COMPILER_PREFIX)-eabi-size
 SREC=srec_cat
 SREC_INFO=srec_info
 
@@ -72,7 +81,8 @@ LINKER_FLAGS=-Wl,--gc-sections 		\
 			-mcpu=cortex-m3		\
 			-mthumb			\
 			-mfloat-abi=soft	\
-			-lm
+			-lm -Os -flto -Wl,--undefined=vTaskSwitchContext \
+			--specs=nano.specs
 
 # compiler flags ---------------------------------------------------------------
 CPUFLAGS=-D GCC_ARMCM3		\
@@ -130,7 +140,11 @@ CXXFLAGS=$(CPUFLAGS) \
 		-fno-rtti 			\
 		-fno-exceptions 	\
 		-fno-non-call-exceptions \
-		-fno-use-cxa-atexit	\
+		-fno-use-cxa-atexit		\
+		-fno-strict-aliasing 		\
+		-fno-rtti 			\
+		-fno-exceptions		\
+		-fno-threadsafe-statics \
 		-T$(LDSCRIPT)
 
 
@@ -172,21 +186,25 @@ OUT_OBJS_CPP=$(addprefix $(OUTPUT_DIR)/,$(OBJS_CPP))
 OUT_OBJS_S=$(addprefix $(OUTPUT_DIR)/,$(OBJS_S))
 OUT_HEXFILE=$(addprefix $(HEXFILE_DIR)/,$(OUTPUT_EXE))
 
-all: $(OUT_HEXFILE).hex
-	
+all: $(OUT_HEXFILE).hex $(OUT_HEXFILE).bin
+
 #
 # The rule to create the target directory
 #
 
 # Create hexfile
 %.hex : %.elf
-	$(SIZE) -x $^
+	$(SIZE) $^
 	$(OBJCOPY) $^ -O ihex $@
+
+%.bin : %.elf
+	$(SIZE) $^
+	$(OBJCOPY) $^ -O binary $@
 
 $(OUT_HEXFILE).elf : $(OUT_OBJS) $(OUT_OBJS_CPP) $(OUT_OBJS_S) Makefile $(LDSCRIPT)
 	@test -d $(@D) || mkdir -p $(@D)
 	@echo Linking $(OUTPUT_EXE).elf
-	@$(CPP) $(CXXFLAGS) $(OUT_OBJS) $(OUT_OBJS_CPP) $(OUT_OBJS_S)  $(LIBS) $(LINKER_FLAGS)
+	@$(CPP) $(CXXFLAGS) $(OUT_OBJS_S) $(OUT_OBJS) $(OUT_OBJS_CPP) $(LIBS) $(LINKER_FLAGS)
 
 $(OUT_OBJS): $(OUTPUT_DIR)/%.o : %.c Makefile
 	@test -d $(@D) || mkdir -p $(@D)

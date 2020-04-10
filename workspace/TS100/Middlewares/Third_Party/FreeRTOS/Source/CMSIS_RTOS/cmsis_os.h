@@ -462,12 +462,12 @@ const osThreadDef_t os_thread_def_##name = \
 
 #define osThreadStaticDef(name, thread, priority, instances, stacksz, buffer, control)  \
 const osThreadDef_t os_thread_def_##name = \
-{ #name, (thread), (priority), (instances), (stacksz), (buffer), (control) }
+{(char*) #name, (thread), (priority), (instances), (stacksz), (buffer), (control) }
 #else //configSUPPORT_STATIC_ALLOCATION == 0
 
 #define osThreadDef(name, thread, priority, instances, stacksz)  \
 const osThreadDef_t os_thread_def_##name = \
-{ (char*) #name, (thread), (priority), (instances), (stacksz)}
+{ #name, (thread), (priority), (instances), (stacksz)}
 #endif
 #endif
 
